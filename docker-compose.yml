@@ -1,0 +1,131 @@
+
+
+services:
+  db-master:
+    image: ${PERCONA_IMAGE}
+    container_name: percona-master
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${WORDPRESS_DB_NAME}
+      MYSQL_USER: ${WORDPRESS_DB_USER}
+      MYSQL_PASSWORD: ${WORDPRESS_DB_PASSWORD}  
+    volumes:
+      - db_master_data:/var/lib/mysql
+    command: >
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-do-db=${WORDPRESS_DB_NAME}
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --log-slave-updates=ON
+      --read-only=OFF
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${WORDPRESS_DB_USER}", "-p${WORDPRESS_DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wordpress_net
+
+  db-slave:
+    image: ${PERCONA_IMAGE}
+    container_name: percona-slave
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      - db-master
+    volumes:
+      - db_slave_data:/var/lib/mysql
+    
+    command: >
+      --server-id=2
+      --relay-log=relay-bin
+      --read-only=ON
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${WORDPRESS_DB_USER}", "-p${WORDPRESS_DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wordpress_net
+
+  wordpress:
+    image: ${WORDPRESS_IMAGE}
+    container_name: wordpress-app
+    restart: always
+    expose:
+      - "80"
+    environment:
+      WORDPRESS_DB_HOST: db-master:3306
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME','http://localhost:8080');
+        define('WP_SITEURL','http://localhost:8080');     
+    depends_on:
+      - db-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wordpress_net
+
+  wordpress2:
+    image: ${WORDPRESS_IMAGE}
+    container_name: wordpress2-app
+    restart: always
+    expose:
+      - "80"
+    environment:
+      WORDPRESS_DB_HOST: db-master:3306
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME','http://localhost:8080');
+        define('WP_SITEURL','http://localhost:8080');
+    depends_on:
+      - db-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wordpress_net
+
+  nginx:
+    image: ${NGINX_IMAGE}
+    container_name: nginx-balancer
+    restart: always
+    ports:
+      - "8080:80"
+     
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - wordpress_net  
+    depends_on:
+      - wordpress
+      - wordpress2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  db_master_data:
+  db_slave_data:
+
+networks:
+  wordpress_net:
